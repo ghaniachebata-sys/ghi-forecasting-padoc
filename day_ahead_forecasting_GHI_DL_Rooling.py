@@ -1,6 +1,5 @@
-# ============================================================
-# PURE DAY-AHEAD GHI FORECASTING WITHOUT SMOOTHING
-# ============================================================
+# DAY-AHEAD GHI FORECASTING
+
 
 import pandas as pd
 import numpy as np
@@ -15,10 +14,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, SimpleRNN, LSTM, GRU
 from tensorflow.keras.callbacks import EarlyStopping
 
-# ============================================================
-# 0. FIX RANDOM SEEDS FOR REPRODUCIBILITY
-# ============================================================
-
+# FIX RANDOM SEEDS FOR REPRODUCIBILITY
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
@@ -26,9 +22,7 @@ tf.random.set_seed(seed)
 os.environ['PYTHONHASHSEED'] = str(seed)
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
-# ============================================================
 # 1. LOAD DATA
-# ============================================================
 
 df = pd.read_csv("donnés pv.csv")
 df.columns = df.columns.str.strip()
@@ -38,10 +32,7 @@ df = df.set_index("datetime")
 
 data = df[["GHI"]].dropna()
 
-
-# ============================================================
 # 2. TIME FEATURES
-# ============================================================
 
 def add_time_features(df):
     df = df.copy()
@@ -60,33 +51,25 @@ def add_time_features(df):
 
 data = add_time_features(data)
 
-# ============================================================
 # 3. LAGS (DNN)
-# ============================================================
 
 for i in range(1, 13):
     data[f"GHI_lag{i}"] = data["GHI"].shift(i)
 data = data.dropna()
 
-# ============================================================
 # 4. FEATURES
-# ============================================================
 
 features_dnn = [f"GHI_lag{i}" for i in range(1, 13)] + ["time_sin", "time_cos", "doy_sin", "doy_cos"]
 features_seq = ["GHI", "time_sin", "time_cos", "doy_sin", "doy_cos"]
 target = "GHI"
 
-# ============================================================
 # 5. TRAIN / TEST SPLIT
-# ============================================================
 
 train_data = data.loc["2016-03-01":"2016-06-30 23:55"]
 test_data = data.loc["2016-07-01"]
 y_true = test_data["GHI"].values
 
-# ============================================================
 # 6. SCALING
-# ============================================================
 
 # DNN
 scaler_X_dnn = StandardScaler()
@@ -102,10 +85,7 @@ scaler_y_seq = StandardScaler()
 X_seq = scaler_X_seq.fit_transform(train_data[features_seq])
 y_seq = scaler_y_seq.fit_transform(train_data[[target]])
 
-
-# ============================================================
 # 7. CREATE SEQUENCES
-# ============================================================
 
 def create_sequences(X, y, lb):
     Xs, ys = [], []
@@ -117,13 +97,12 @@ def create_sequences(X, y, lb):
 
 X_train_seq, y_train_seq = create_sequences(X_seq, y_seq, look_back)
 
-# ============================================================
+
 # 8. MODELS
-# ============================================================
 
 early_stop = EarlyStopping(patience=10, restore_best_weights=True)
 
-# ---- DNN ----
+# DNN
 dnn = Sequential([
     Dense(64, activation="relu", input_dim=X_train_dnn.shape[1]),
     Dropout(0.2),
@@ -136,7 +115,7 @@ history_dnn = dnn.fit(X_train_dnn, y_train_dnn, epochs=200, batch_size=32,
                       validation_split=0.2, callbacks=[early_stop], verbose=0, shuffle=False)
 
 
-# ---- Sequence Models ----
+# Sequence Models
 def build_seq_rnn_two_layers():
     model = Sequential([
         SimpleRNN(64, return_sequences=True, input_shape=(look_back, nf)),
@@ -175,9 +154,7 @@ history_gru = gru.fit(X_train_seq, y_train_seq, epochs=200, batch_size=32,
                       validation_split=0.2, callbacks=[early_stop], verbose=0, shuffle=False)
 
 
-# ============================================================
 # 9. TIME FEATURES FOR FORECAST
-# ============================================================
 
 def next_time_features(t):
     tm = t.hour * 60 + t.minute
@@ -189,9 +166,7 @@ def next_time_features(t):
     )
 
 
-# ============================================================
 # 10. PURE DAY-AHEAD FORECAST WITHOUT SMOOTHING
-# ============================================================
 
 def forecast_dnn(model, history, steps):
     hist = history.copy()
@@ -241,10 +216,7 @@ y_pred_rnn = forecast_seq(rnn, train_data, steps)
 y_pred_lstm = forecast_seq(lstm, train_data, steps)
 y_pred_gru = forecast_seq(gru, train_data, steps)
 
-
-# ============================================================
 # 11. METRICS
-# ============================================================
 
 def metrics(y_true, y_pred):
     return (
@@ -260,11 +232,9 @@ print("RNN :", metrics(y_true, y_pred_rnn))
 print("LSTM:", metrics(y_true, y_pred_lstm))
 print("GRU :", metrics(y_true, y_pred_gru))
 
-# ============================================================
 # 12. VISUALIZATION
-# ============================================================
 
-# --- Time series ---
+# Time series
 plt.figure(figsize=(15, 6))
 plt.plot(test_data.index, y_true, 'k', lw=2.5, label='Observed')
 plt.plot(test_data.index, y_pred_dnn, '--', label='DNN')
@@ -279,7 +249,7 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# --- Scatter plots ---
+# Scatter plots
 fig, axes = plt.subplots(2, 2, figsize=(12, 12))
 models_pred = [("DNN", y_pred_dnn), ("RNN", y_pred_rnn), ("LSTM", y_pred_lstm), ("GRU", y_pred_gru)]
 
@@ -295,7 +265,7 @@ plt.suptitle("Observed vs Predicted GHI – DL Models ", fontsize=14)
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 plt.show()
 
-# --- Boxplot errors ---
+# Boxplot errors
 errors = [y_true - y_pred_dnn, y_true - y_pred_rnn, y_true - y_pred_lstm, y_true - y_pred_gru]
 plt.figure(figsize=(8, 5))
 plt.boxplot(errors, labels=["DNN", "RNN", "LSTM", "GRU"], showfliers=False)
@@ -307,7 +277,7 @@ plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# --- Optional: Training & Validation loss ---
+# Optional: Training & Validation loss
 plt.figure(figsize=(12, 5))
 plt.plot(history_dnn.history['loss'], label='DNN train loss')
 plt.plot(history_dnn.history['val_loss'], label='DNN val loss')
@@ -324,9 +294,8 @@ plt.legend()
 plt.grid(alpha=0.3)
 plt.tight_layout()
 plt.show()
-# ============================================================
+
 # 13. IDENTIFIER LE MEILLEUR MODÈLE DL
-# ============================================================
 
 # Calcul des métriques pour tous les modèles
 results_dl = {}
@@ -346,9 +315,7 @@ print(f"R²   = {results_dl[best_model_name]['R2']:.4f}")
 print(f"RMSE = {results_dl[best_model_name]['RMSE']:.2f} W/m²")
 print(f"MAE  = {results_dl[best_model_name]['MAE']:.2f} W/m²")
 
-# ============================================================
 # 14. SAUVEGARDER LES PRÉDICTIONS DU MEILLEUR MODÈLE
-# ============================================================
 
 pred_df = pd.DataFrame({
     "datetime": test_data.index,
@@ -356,9 +323,7 @@ pred_df = pd.DataFrame({
 })
 pred_df.to_csv(f"GHI_forecast_best_DL_{best_model_name}_2016-07-01.csv", index=False)
 
-# ============================================================
 # 15. SAUVEGARDER LES MÉTRIQUES
-# ============================================================
 
 metrics_df = pd.DataFrame({
     "Model": list(results_dl.keys()),
